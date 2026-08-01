@@ -1,0 +1,17 @@
+# --- Core pipeline ---
+httpx>=0.27               # async client for the vLLM/SGLang OpenAI-compatible endpoint
+pydantic>=2.7             # schema definition + validation of extracted fields
+PyYAML>=6.0               # config.yaml
+python-dateutil>=2.9      # tolerant date parsing across vendor formats
+
+# --- Document handling ---
+PyMuPDF>=1.24             # PDF -> PNG rasterisation (fast, no external binaries)
+opencv-python-headless>=4.10
+numpy>=1.26
+Pillow>=10.3
+
+# --- Output ---
+openpyxl>=3.1             # writes values into the .xlsx template, preserving styling
+
+# --- Optional: only needed on the GPU host that serves the model ---
+# vllm>=0.8

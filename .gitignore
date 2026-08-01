@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime data — invoices and extracted values must never be committed.
+data/
+inbox/
+processed/
+failed/
+output/
+*.db
+*.db-wal
+*.db-shm
+
+# Your real template lives here; keep the folder, ignore the workbooks.
+templates/*.xlsx
+templates/*.xlsm
+
+.DS_Store

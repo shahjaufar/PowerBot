@@ -1,0 +1,141 @@
+# ---------------------------------------------------------------------------
+# Invoice pipeline configuration.
+#
+# Everything that changes when your template or your vendors change lives here,
+# not in code. Adding a column to the register should never require a code edit.
+# ---------------------------------------------------------------------------
+
+model:
+  # OpenAI-compatible endpoint exposed by vLLM or SGLang. See README for the
+  # serve command. Nothing leaves your network.
+  base_url: "http://localhost:8000/v1"
+  name: "numind/NuExtract3"
+  # Guided decoding backend. xgrammar is the vLLM/SGLang default and makes
+  # schema-invalid JSON structurally impossible rather than merely unlikely.
+  guided_backend: "xgrammar"
+  temperature: 0.0
+  max_tokens: 4096
+  timeout_seconds: 180
+  # Concurrent in-flight requests. The server batches these internally; going
+  # much above ~16 on a single 24GB card mostly just grows the queue.
+  concurrency: 12
+
+preprocess:
+  # Rasterisation DPI for PDF pages. 300 is the accepted floor for OCR-grade
+  # input; going higher costs tokens with little accuracy gain.
+  dpi: 300
+  # Longest edge in pixels after downscaling. Caps vision-token cost on
+  # high-megapixel phone photos.
+  max_edge_px: 2200
+  deskew: true
+  # Maximum rotation (degrees) the deskewer will correct. Beyond this the page
+  # is assumed to be mis-detected rather than merely skewed, and left alone.
+  max_skew_deg: 15
+  autocrop: true          # contour-detect the page and drop the background
+  enhance_contrast: true  # CLAHE - helps a lot on phone photos with shadows
+  # Pages beyond this per document are ignored. Invoices are rarely long; this
+  # is a guard against a 200-page PDF landing in the inbox.
+  max_pages: 10
+
+# ---------------------------------------------------------------------------
+# Extraction schema. Field order here defines the order used everywhere.
+# `type` is one of: string | number | date | currency | integer
+# Add a field here and it flows through extraction, validation and Excel.
+# ---------------------------------------------------------------------------
+fields:
+  - name: invoice_number
+    type: string
+    required: true
+    description: "The invoice's own reference number, not a PO or account number."
+  - name: invoice_date
+    type: date
+    required: true
+    description: "Date the invoice was issued."
+  - name: due_date
+    type: date
+    required: false
+    description: "Payment due date, if stated."
+  - name: vendor_name
+    type: string
+    required: true
+    description: "Legal name of the company issuing the invoice."
+  - name: vendor_tax_id
+    type: string
+    required: false
+    description: "VAT / GST / ABN / EIN number of the vendor."
+  - name: customer_name
+    type: string
+    required: false
+    description: "The entity being billed."
+  - name: currency
+    type: string
+    required: true
+    description: "ISO 4217 code, e.g. USD, EUR, GBP. Infer from symbol if unlabelled."
+  - name: subtotal
+    type: currency
+    required: false
+    description: "Net amount before tax."
+  - name: tax_amount
+    type: currency
+    required: false
+    description: "Total tax/VAT charged."
+  - name: total_amount
+    type: currency
+    required: true
+    description: "Final amount payable, including tax."
+  - name: purchase_order
+    type: string
+    required: false
+    description: "PO number referenced on the invoice, if any."
+
+validation:
+  # subtotal + tax must equal total within this absolute tolerance, to absorb
+  # the rounding invoices routinely do.
+  arithmetic_tolerance: 0.02
+  # Rows scoring below this are written to the register but flagged for review.
+  review_threshold: 0.80
+  # Reject dates outside this window - catches OCR turning 2025 into 2925.
+  min_year: 2000
+  max_year: 2100
+
+excel:
+  # The pipeline NEVER writes to this file. It is opened read-only as a
+  # starting point and every run saves to a new output file.
+  template_path: "templates/invoice_register.xlsx"
+  output_dir: "output"
+  sheet_name: null        # null = use the workbook's active sheet
+  # Row containing your column headers. Data is appended below the last
+  # non-empty row so repeat runs accumulate rather than overwrite.
+  header_row: 1
+  # Map schema field -> template column letter. Change these to match your
+  # actual register; unmapped fields are simply not written.
+  columns:
+    invoice_number: "A"
+    invoice_date: "B"
+    due_date: "C"
+    vendor_name: "D"
+    vendor_tax_id: "E"
+    customer_name: "F"
+    currency: "G"
+    subtotal: "H"
+    tax_amount: "I"
+    total_amount: "J"
+    purchase_order: "K"
+    # Pipeline-generated audit columns.
+    source_file: "L"
+    confidence: "M"
+    review_flags: "N"
+  # Excel number formats applied to written cells, by field type.
+  date_format: "yyyy-mm-dd"
+  currency_format: "#,##0.00"
+
+storage:
+  # SQLite is the system of record. Excel is a rendering of it.
+  # This is what makes reruns idempotent and lets you regenerate the register
+  # at any time without re-running the model.
+  db_path: "data/invoices.db"
+
+paths:
+  inbox: "inbox"
+  processed: "processed"
+  failed: "failed"
