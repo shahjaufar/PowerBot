@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -28,6 +29,7 @@ import yaml
 
 from . import excel_writer
 from .extract import ExtractionError, extract
+from .extract_cpu import extract_cpu
 from .preprocess import SUPPORTED_SUFFIXES, prepare
 from .schema import load_fields
 from .store import Store, file_hash
@@ -75,7 +77,10 @@ async def _process_one(
         )
 
         async with semaphore:
-            raw = await extract(client, pages, fields, config["model"])
+            if config["model"].get("backend", "vlm") == "ocr_llm":
+                raw = await extract_cpu(client, pages, fields, config["model"], loop)
+            else:
+                raw = await extract(client, pages, fields, config["model"])
 
         result = validate(raw, fields, config["validation"])
         store.upsert(
@@ -109,6 +114,20 @@ async def run(config: dict[str, Any], inbox: Path | None, no_export: bool) -> in
 
     model_cfg = config["model"]
     concurrency = int(model_cfg.get("concurrency", 12))
+
+    # On the CPU backend the work happens locally, so oversubscribing cores
+    # makes every document slower without raising throughput. Tesseract is
+    # itself multi-threaded, hence cores/2 rather than cores.
+    if model_cfg.get("backend") == "ocr_llm":
+        safe = max(1, (os.cpu_count() or 4) // 2)
+        if concurrency > safe:
+            log.warning(
+                "concurrency %d exceeds what %d cores can serve on the CPU "
+                "backend; reducing to %d (set model.concurrency to override)",
+                concurrency, os.cpu_count() or 4, safe,
+            )
+            concurrency = safe
+
     semaphore = asyncio.Semaphore(concurrency)
     loop = asyncio.get_running_loop()
 

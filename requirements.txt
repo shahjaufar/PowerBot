@@ -13,5 +13,13 @@ Pillow>=10.3
 # --- Output ---
 openpyxl>=3.1             # writes values into the .xlsx template, preserving styling
 
-# --- Optional: only needed on the GPU host that serves the model ---
-# vllm>=0.8
+# --- CPU backend only (model.backend: ocr_llm) ---
+# Also needs the Tesseract binary itself:
+#   Debian/Ubuntu:  apt-get install tesseract-ocr
+#   macOS:          brew install tesseract
+#   Windows:        https://github.com/UB-Mannheim/tesseract/wiki
+pytesseract>=0.3.10
+
+# --- Serving the model (install on whichever host serves it) ---
+# GPU backend:  vllm>=0.8
+# CPU backend:  llama-cpp-python[server]>=0.3

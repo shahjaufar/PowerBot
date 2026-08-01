@@ -6,10 +6,20 @@
 # ---------------------------------------------------------------------------
 
 model:
-  # OpenAI-compatible endpoint exposed by vLLM or SGLang. See README for the
-  # serve command. Nothing leaves your network.
+  # Which extraction backend to use:
+  #   vlm     - GPU. Page images straight to a vision model. Best accuracy.
+  #   ocr_llm - CPU. Tesseract first, then a text model over the OCR output.
+  #             Avoids the vision encoder and ~1-2k image tokens of prefill,
+  #             which is what makes a VLM impractical without a GPU.
+  backend: "vlm"
+
+  # OpenAI-compatible endpoint exposed by vLLM/SGLang (vlm) or by
+  # llama.cpp's server (ocr_llm). See README for both serve commands.
+  # Nothing leaves your network either way.
   base_url: "http://localhost:8000/v1"
   name: "numind/NuExtract3"
+  # Tesseract language pack(s), ocr_llm backend only. "eng+deu" for mixed.
+  ocr_lang: "eng"
   # Guided decoding backend. xgrammar is the vLLM/SGLang default and makes
   # schema-invalid JSON structurally impossible rather than merely unlikely.
   guided_backend: "xgrammar"

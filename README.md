@@ -8,6 +8,65 @@ Built for: **2,000–50,000 invoices/month**, **scanned/photo input**,
 
 ---
 
+## No GPU? Use the CPU backend
+
+Set `model.backend: ocr_llm` in `config.yaml`. It OCRs each page with
+Tesseract and runs a **text** model over the result, instead of a vision model
+over the image. That removes the vision encoder and the 1,000–2,000 image
+tokens of prefill per page — which is what makes a VLM impractical on CPU. A
+reconstructed invoice page measures around 110 tokens, so only the ~200 tokens
+of JSON output actually get generated.
+
+Measured on 4 (weak) cores at 300 DPI, single-threaded:
+
+| Stage | Time |
+|---|---|
+| Rasterise | 81 ms |
+| Preprocess (autocrop + deskew + CLAHE) | 722 ms |
+| OCR + line reconstruction | 793 ms |
+| **Total, excluding generation** | **~1.5 s/invoice** |
+
+So OCR is not the bottleneck — **generation is**. Budget roughly 10–20 s per
+invoice per stream for a 7B model on server CPU, which puts even 50,000/month
+(~1,700/day) inside an overnight batch window on a decent multi-core box.
+
+Two tuning levers that matter a lot here:
+
+- **Don't oversubscribe cores.** Running concurrency 12 on 4 cores took 67 s
+  for 3 documents; capping it at cores/2 took 14 s for the same work. The
+  pipeline now caps this automatically and warns.
+- **Try `preprocess.dpi: 150`.** On clean scans it halved preprocess+OCR time
+  (1,514 ms → 814 ms) with no field loss. Verify against *your* photos before
+  adopting it — this was measured on a clean synthetic invoice.
+
+**The honest trade:** OCR discards the visual layout that makes a VLM good at
+this, so expect lower accuracy than the GPU path, worst on poor-quality
+photos where OCR itself is the limiting factor. The validation layer is what
+keeps it usable — an arithmetic cross-check catches a misread total no matter
+which backend produced it.
+
+**Why not pure rules instead of a model?** I tried. Label-anchored regex over
+OCR boxes got **5/8 fields** on a *clean synthetic* invoice: `TOTAL` matched
+the `Subtotal` line, and `VAT @ 20%` yielded `20`. Rules need per-layout
+tuning and degrade badly on photos. A small model over OCR text costs seconds
+and generalises across vendors.
+
+### Serving on CPU
+
+```bash
+pip install "llama-cpp-python[server]"
+
+python -m llama_cpp.server \
+  --model qwen2.5-7b-instruct-q4_k_m.gguf \
+  --n_ctx 8192 --n_threads $(nproc) --port 8000
+```
+
+Use the largest model your latency budget tolerates — 7B Q4 is a good start;
+drop to 3B if too slow. llama.cpp compiles the JSON schema to a GBNF grammar,
+so you keep the same structural guarantee as the GPU path.
+
+---
+
 ## Why this stack
 
 The on-premise constraint rules out the accuracy leaders — Azure Document
@@ -50,11 +109,24 @@ the workbook with it. Extracting to SQLite first buys idempotent reruns
 (content-hash dedup) and lets you regenerate the register after a template or
 mapping change without re-running the model.
 
-### Hardware
+### Hardware options
 
 A single 24GB GPU (RTX 4090 / L4 / A10) is comfortable for a 4B model. At
 50,000/month — about 1,700/day — you have a very large margin; this workload
 does not need multi-GPU.
+
+If you don't have one, in rough order of value:
+
+| Option | Cost | Notes |
+|---|---|---|
+| **Buy a GPU** | ~$800 used 3090 / ~$1,600 4090, one-time | Best long-run value and strictly on-premise. Pays back against rental inside a year. |
+| **CPU backend** | £0 | Works today, no new spend. Lower accuracy — see above. |
+| **Dedicated GPU server** | from ~€184/mo (Hetzner RTX 4000 SFF Ada) | Single-tenant hardware you control, not a shared AI API — but the data does leave your building, so it's a compliance question, not a technical one. |
+
+Note the CPU and GPU backends share everything except `extract*.py` —
+preprocessing, validation, storage and Excel output are identical. Switching
+later is a one-line config change, so starting on CPU costs you nothing if you
+add a GPU afterwards.
 
 ---
 
@@ -152,6 +224,9 @@ Amounts are written as real numbers and dates as real dates, not text. Text
 
 | Symptom | Change |
 |---|---|
+| CPU backend too slow | Lower `preprocess.dpi` to 150; use a smaller GGUF |
+| CPU box thrashing | Lower `model.concurrency` (auto-capped at cores/2) |
+| OCR misses non-English text | Set `model.ocr_lang`, e.g. `eng+deu`, install the language pack |
 | Amounts misread on photos | Raise `preprocess.dpi`, `max_edge_px` |
 | Autocrop removing content | Set `preprocess.autocrop: false` |
 | GPU underutilised | Raise `model.concurrency` |

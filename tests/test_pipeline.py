@@ -371,6 +371,65 @@ def test_template_misconfiguration_detected() -> None:
         check("missing template raises TemplateError", True)
 
 
+def test_ocr_line_reconstruction() -> None:
+    """The CPU backend's correctness hinges on this.
+
+    Tesseract's own reading order interleaves a two-column invoice header, so
+    "Subtotal" lands in a different line from its amount. Everything
+    downstream then associates the wrong value with the label. These checks
+    assert the spatial regrouping puts them back together.
+    """
+    print("\nOCR spatial line reconstruction (CPU backend)")
+    import fitz
+
+    from src.ocr import document_to_text, page_to_text, read_page
+
+    cfg = load_cfg()["preprocess"]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf = Path(tmp) / "two_column.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        # Left column label, right column value — the layout that breaks
+        # naive reading order.
+        page.insert_text((72, 80), "ACME SUPPLIES LIMITED", fontsize=16)
+        page.insert_text((400, 80), "Invoice No: INV-2026-0417", fontsize=10)
+        page.insert_text((72, 300), "Subtotal", fontsize=10)
+        page.insert_text((420, 300), "1,000.00", fontsize=10)
+        page.insert_text((72, 320), "VAT @ 20%", fontsize=10)
+        page.insert_text((420, 320), "200.00", fontsize=10)
+        doc.save(pdf)
+        doc.close()
+
+        pages = prepare(pdf, cfg)
+        lines = read_page(pages[0])
+        text = page_to_text(lines)
+
+        subtotal_line = next((l for l in text.splitlines() if "Subtotal" in l), "")
+        vat_line = next((l for l in text.splitlines() if "VAT" in l), "")
+
+        check("label and value land on one line",
+              "1,000.00" in subtotal_line, f"got {subtotal_line!r}")
+        check("second label/value pair also reunited",
+              "200.00" in vat_line, f"got {vat_line!r}")
+        check("column gap marked for the model",
+              "|" in subtotal_line, f"got {subtotal_line!r}")
+        check("values are not cross-associated",
+              "200.00" not in subtotal_line, f"got {subtotal_line!r}")
+
+        combined = document_to_text(pages)
+        check("document_to_text returns non-empty text", len(combined) > 40,
+              f"{len(combined)} chars")
+        # OCR text must be far smaller than image-token equivalent - this is
+        # the whole reason the CPU backend is viable.
+        check(f"page is ~{len(combined)//4} tokens, well under image-token cost",
+              len(combined) // 4 < 600, f"{len(combined)//4} tokens")
+
+        multi = document_to_text(pages + pages)
+        check("multi-page output is labelled per page",
+              "--- page 2 ---" in multi, multi[:80])
+
+
 def main() -> int:
     print("=" * 68)
     print("Invoice pipeline test suite")
@@ -381,6 +440,7 @@ def main() -> int:
     test_schema_generation()
     test_preprocessing()
     test_multipage_pdf()
+    test_ocr_line_reconstruction()
     test_store_dedup()
     test_excel_export()
     test_export_appends_not_overwrites()
