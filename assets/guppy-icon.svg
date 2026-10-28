@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-label="Guppy icon" role="img">
+  <!-- Body -->
+  <path d="M9 34 C13 25 27 22 40 30 L40 34 C29 43 15 43 9 34 Z"/>
+  <!-- Fan tail -->
+  <path d="M40 30 C45 27 51 20 57 13 C61 25 61 39 57 51 C51 44 45 37 40 34"/>
+  <!-- Tail rays -->
+  <path d="M46 30 C49 28 52 24 55 20 M46 34 C49 36 52 40 55 44"/>
+  <!-- Dorsal fin -->
+  <path d="M21 25 C23 17 32 13 41 18 C38 21 36 24 35 26"/>
+  <!-- Anal fin -->
+  <path d="M23 40.5 C25 45 30 46 33 42"/>
+  <!-- Gill -->
+  <path d="M22 28 C24 31 24 36 22 39"/>
+  <!-- Spot -->
+  <circle cx="30" cy="33" r="1.8"/>
+  <!-- Eye -->
+  <circle cx="16" cy="32" r="2.2" fill="currentColor" stroke="none"/>
+</svg>
